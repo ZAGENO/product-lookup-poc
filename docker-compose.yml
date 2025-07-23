@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  product-search-service:
+    build: .
+    ports:
+      - "50051:50051"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_PSE_ID=${GOOGLE_PSE_ID}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - GRPC_PORT=50051
+      - MAX_WORKERS=10
+    volumes:
+      - ./src:/app/src
+    restart: unless-stopped

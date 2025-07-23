@@ -1,0 +1,24 @@
+{
+  "fields": {
+    "title": {
+      "enabled": true,
+      "selectors": "h1, .product-title, .title"
+    },
+    "brand": {
+      "enabled": true,
+      "selectors": ".brand, .manufacturer, .vendor"
+    },
+    "price": {
+      "enabled": true,
+      "selectors": ".price, .product-price, .offer-price"
+    },
+    "description": {
+      "enabled": true,
+      "selectors": ".description, .product-description, [id*=description]"
+    },
+    "part_number": {
+      "enabled": true,
+      "selectors": "[id*='part-number'], [id*='model-number'], [id*='sku'], [class*='part-number'], [class*='model-number'], [class*='sku'], .part-number, .model-number, .sku, .mpn, [data-test*='sku'], [data-test*='part'], span:has-text('Part #'), span:has-text('SKU'), span:has-text('Item #'), span:has-text('Model'), li:has-text('Part #'), li:has-text('SKU'), li:has-text('Item #'), li:has-text('Model'), tr:has-text('Part Number'), div:has-text('SKU:')"
+    }
+  }
+}

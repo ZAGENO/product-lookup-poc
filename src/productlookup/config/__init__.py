@@ -1,0 +1,1 @@
+from productlookup.config.settings import *

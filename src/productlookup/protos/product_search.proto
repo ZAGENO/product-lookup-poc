@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package productlookup;
+
+service ProductSearch {
+  rpc SearchProduct(SearchProductRequest) returns (SearchProductResponse) {}
+}
+
+message SearchProductRequest {
+  string query = 1;
+}
+
+message ProductData {
+  string product_id = 1;
+  string product_name = 2;
+  string brand = 3;
+  string description = 4;
+  string price = 5;
+  string product_url = 6;
+}
+
+message SearchProductResponse {
+  repeated ProductData products = 1;
+}
