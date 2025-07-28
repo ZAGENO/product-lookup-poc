@@ -21,32 +21,6 @@ class WebCrawlerService:
         self.logger = logging.getLogger(__name__)
         self.data_enricher = ProductDataEnricherService()
 
-        # Default extraction config (fallback if file cannot be loaded)
-        self.extraction_config = {
-            "fields": {
-                "title": {
-                    "enabled": True,
-                    "selectors": "h1, .product-title, .title"
-                },
-                "brand": {
-                    "enabled": True,
-                    "selectors": ".brand, .manufacturer, .vendor"
-                },
-                "price": {
-                    "enabled": True,
-                    "selectors": ".price, .product-price, .offer-price"
-                },
-                "description": {
-                    "enabled": True,
-                    "selectors": ".description, .product-description, [id*=description]"
-                },
-                "part_number": {
-                    "enabled": True,
-                    "selectors": "[id*='part-number'], [id*='model-number'], [id*='sku'], .part-number, .model-number, .sku, .mpn, [data-test*='sku'], [data-test*='part'], li:has-text('Part #'), li:has-text('SKU'), li:has-text('Item #'), li:has-text('Model'), tr:has-text('Part Number')"
-                }
-            }
-        }
-
         # Load config from file
         self._load_extraction_config()
 
@@ -54,17 +28,18 @@ class WebCrawlerService:
         """Load extraction configuration from environment variables"""
         config_path = os.getenv("CRAWLER_CONFIG_PATH")
 
+        if not config_path:
+            raise ProductLookupError("CRAWLER_CONFIG_PATH environment variable is not set")
+
+        if not os.path.exists(config_path):
+            raise ProductLookupError(f"Extraction config file not found at: {config_path}")
+
         try:
-            if config_path and os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    custom_config = json.load(f)
-                    self.extraction_config = custom_config
-                    self.logger.info(f"Loaded extraction config from {config_path}")
-            else:
-                self.logger.warning(f"Config file not found or path not specified. Using default configuration.")
+            with open(config_path, 'r') as f:
+                self.extraction_config = json.load(f)
+                self.logger.info(f"Loaded extraction config from {config_path}")
         except Exception as e:
-            self.logger.error(f"Failed to load extraction config: {str(e)}")
-            self.logger.info("Using default configuration")
+            raise ProductLookupError(f"Failed to load extraction config: {str(e)}")
 
     async def initialize(self):
         """Initialize browser for crawling"""
