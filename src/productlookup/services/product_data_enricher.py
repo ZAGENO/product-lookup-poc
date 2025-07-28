@@ -12,7 +12,7 @@ class ProductDataEnricherService:
 
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.cache = {}  # Simple in-memory cache
+        self.cache = {}  # Simple in-memory cache (caching with product URL as key)
 
         # Ollama configuration
         # Ollama configuration
@@ -32,7 +32,7 @@ class ProductDataEnricherService:
 
         # Check if we have cached results
         if cache_key in self.cache:
-            self.logger.info(f"Using cached LLM extraction for {cache_key}")
+            self.logger.info(f"Using csached LLM extraction for {cache_key}")
             extracted_data = self.cache[cache_key]
             return self._update_product_with_data(product, extracted_data)
 
