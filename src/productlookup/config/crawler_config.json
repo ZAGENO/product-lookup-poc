@@ -18,7 +18,11 @@
     },
     "part_number": {
       "enabled": true,
-      "selectors": "[id*='part-number'], [id*='model-number'], [id*='sku'], [class*='part-number'], [class*='model-number'], [class*='sku'], .part-number, .model-number, .sku, .mpn, [data-test*='sku'], [data-test*='part'], span:has-text('Part #'), span:has-text('SKU'), span:has-text('Item #'), span:has-text('Model'), li:has-text('Part #'), li:has-text('SKU'), li:has-text('Item #'), li:has-text('Model'), tr:has-text('Part Number'), div:has-text('SKU:')"
+      "selectors": "[id*='part-number'], [id*='model-number'], .part-number, .model-number, .mpn, [data-test*='part'], span:has-text('Part #'), li:has-text('Part #'), li:has-text('Model'), tr:has-text('Part Number'), div:has-text('Part #')"
+    },
+    "sku_id": {
+      "enabled": true,
+      "selectors": "[id*='sku'], [class*='sku'], .sku, [data-test*='sku'], span:has-text('SKU'), span:has-text('Item #'), li:has-text('SKU'), li:has-text('Item #'), div:has-text('SKU:')"
     }
   }
 }

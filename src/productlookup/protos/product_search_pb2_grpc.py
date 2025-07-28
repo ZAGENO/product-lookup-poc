@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from src.productlookup.protos import product_search_pb2 as src_dot_productlookup_dot_protos_dot_product__search__pb2
+from productlookup.protos import product_search_pb2 as productlookup_dot_protos_dot_product__search__pb2
 
 
 class ProductSearchStub(object):
@@ -16,8 +16,8 @@ class ProductSearchStub(object):
         """
         self.SearchProduct = channel.unary_unary(
                 '/productlookup.ProductSearch/SearchProduct',
-                request_serializer=src_dot_productlookup_dot_protos_dot_product__search__pb2.SearchProductRequest.SerializeToString,
-                response_deserializer=src_dot_productlookup_dot_protos_dot_product__search__pb2.SearchProductResponse.FromString,
+                request_serializer=productlookup_dot_protos_dot_product__search__pb2.SearchProductRequest.SerializeToString,
+                response_deserializer=productlookup_dot_protos_dot_product__search__pb2.SearchProductResponse.FromString,
                 )
 
 
@@ -35,8 +35,8 @@ def add_ProductSearchServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'SearchProduct': grpc.unary_unary_rpc_method_handler(
                     servicer.SearchProduct,
-                    request_deserializer=src_dot_productlookup_dot_protos_dot_product__search__pb2.SearchProductRequest.FromString,
-                    response_serializer=src_dot_productlookup_dot_protos_dot_product__search__pb2.SearchProductResponse.SerializeToString,
+                    request_deserializer=productlookup_dot_protos_dot_product__search__pb2.SearchProductRequest.FromString,
+                    response_serializer=productlookup_dot_protos_dot_product__search__pb2.SearchProductResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -60,7 +60,7 @@ class ProductSearch(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/productlookup.ProductSearch/SearchProduct',
-            src_dot_productlookup_dot_protos_dot_product__search__pb2.SearchProductRequest.SerializeToString,
-            src_dot_productlookup_dot_protos_dot_product__search__pb2.SearchProductResponse.FromString,
+            productlookup_dot_protos_dot_product__search__pb2.SearchProductRequest.SerializeToString,
+            productlookup_dot_protos_dot_product__search__pb2.SearchProductResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

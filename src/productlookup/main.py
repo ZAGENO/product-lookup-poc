@@ -37,7 +37,8 @@ class ProductSearchService(product_search_pb2_grpc.ProductSearchServicer):
             response = product_search_pb2.SearchProductResponse()
             for product in products:
                 product_data = product_search_pb2.ProductData(
-                    product_id=product.get("product_id", ""),
+                    sku_id=product.get("sku_id", ""),
+                    part_number=product.get("part_number", ""),
                     product_name=product.get("product_name", ""),
                     brand=product.get("brand", ""),
                     description=product.get("description", ""),

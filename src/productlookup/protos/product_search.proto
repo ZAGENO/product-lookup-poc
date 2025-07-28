@@ -11,12 +11,13 @@ message SearchProductRequest {
 }
 
 message ProductData {
-  string product_id = 1;
+  string sku_id = 1;
   string product_name = 2;
   string brand = 3;
   string description = 4;
   string price = 5;
   string product_url = 6;
+  string part_number = 7;
 }
 
 message SearchProductResponse {

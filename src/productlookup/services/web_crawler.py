@@ -11,9 +11,6 @@ from productlookup.services.product_data_enricher import ProductDataEnricherServ
 
 logger = logging.getLogger(__name__)
 
-# Default config path
-DEFAULT_CONFIG_PATH = "/Users/arijitroy/PycharmProjects/product-lookup-poc/src/productlookup/config/crawler_config.json"
-
 class WebCrawlerService:
     """Service for crawling product pages using Playwright"""
 
@@ -55,11 +52,7 @@ class WebCrawlerService:
 
     def _load_extraction_config(self):
         """Load extraction configuration from environment variables"""
-        # Primary config path from .env file
-        default_path = os.getenv("CRAWLER_CONFIG_PATH", "")
-
-        # Allow override with EXTRACTION_CONFIG_PATH for backward compatibility
-        config_path = os.getenv("EXTRACTION_CONFIG_PATH", default_path)
+        config_path = os.getenv("CRAWLER_CONFIG_PATH")
 
         try:
             if config_path and os.path.exists(config_path):
@@ -68,7 +61,7 @@ class WebCrawlerService:
                     self.extraction_config = custom_config
                     self.logger.info(f"Loaded extraction config from {config_path}")
             else:
-                self.logger.warning(f"Config file not found at {config_path}, using default configuration")
+                self.logger.warning(f"Config file not found or path not specified. Using default configuration.")
         except Exception as e:
             self.logger.error(f"Failed to load extraction config: {str(e)}")
             self.logger.info("Using default configuration")
@@ -81,6 +74,7 @@ class WebCrawlerService:
             self.browser_context = await self.browser.new_context()
 
 
+    # In web_crawler.py, modify get_detailed_product_info method
     async def get_detailed_product_info(self, products):
         """Scrape detailed information from each product URL with batching for API calls"""
         enriched_products = []
@@ -108,30 +102,42 @@ class WebCrawlerService:
                         url = page.url
                         is_category_page = any(pattern in url for pattern in ['/c/', '/category/', '/collection/', '/products/'])
 
-                        # Set a default part_number value
+                        # Extract both sku_id and part_number separately
+                        sku_id = None
                         part_number = None
 
-                        # Try to extract part number using CSS selectors, but only if it's not a category page
+                        # Extract SKU ID first
+                        if not is_category_page and self.extraction_config["fields"]["sku_id"]["enabled"]:
+                            selectors = self.extraction_config["fields"]["sku_id"]["selectors"]
+                            for selector in selectors.split(', '):
+                                sku_id = await self._extract_text(page, selector, field_type="sku_id")
+                                if sku_id:
+                                    sku_id = self._clean_identifier(sku_id)
+                                    if sku_id:
+                                        self.logger.info(f"Found SKU ID: {sku_id}")
+                                        break
+
+                        # Extract part number separately
                         if not is_category_page and self.extraction_config["fields"]["part_number"]["enabled"]:
                             selectors = self.extraction_config["fields"]["part_number"]["selectors"]
                             for selector in selectors.split(', '):
-                                part_number = await self._extract_text(page, selector)
+                                part_number = await self._extract_text(page, selector, field_type="part_number")
                                 if part_number:
-                                    part_number = self._clean_part_number(part_number)
+                                    part_number = self._clean_identifier(part_number)
                                     if part_number:
                                         self.logger.info(f"Found part number: {part_number}")
                                         break
-                        elif is_category_page:
-                            self.logger.info(f"Skipping part number extraction for category page: {url}")
-                            part_number = "Not found"  # Explicitly set "Not found" for category pages
 
-                        # Always set a value for part_number if none was found
+                        # Set default values if not found
+                        if not sku_id:
+                            sku_id = "Not found"
                         if not part_number:
-                            part_number = "Not found"  # Set "Not found" if no part number was extracted
+                            part_number = "Not found"
 
-                        # Update the product with the extracted part number
+                        # Update the product with both extracted values
                         enriched_product = product_search_pb2.ProductData(
-                            product_id=part_number,
+                            sku_id=sku_id,
+                            part_number=part_number,
                             product_name=product.product_name,
                             brand=product.brand or "Not found",
                             price=product.price or "Not found",
@@ -149,7 +155,8 @@ class WebCrawlerService:
                     except Exception as e:
                         self.logger.error(f"Error scraping page content: {str(e)}")
                         batch_results.append(product_search_pb2.ProductData(
-                            product_id="Not found",
+                            sku_id="Not found",
+                            part_number="Not found",
                             product_name=product.product_name,
                             brand=product.brand or "Not found",
                             price=product.price or "Not found",
@@ -163,7 +170,8 @@ class WebCrawlerService:
                 except Exception as e:
                     self.logger.error(f"Failed to create page for {product.product_url}: {str(e)}")
                     batch_results.append(product_search_pb2.ProductData(
-                        product_id="Not found",
+                        sku_id="Not found",
+                        part_number="Not found",
                         product_name=product.product_name,
                         brand=product.brand or "Not found",
                         price=product.price or "Not found",
@@ -180,7 +188,7 @@ class WebCrawlerService:
 
         return enriched_products
 
-    def _clean_part_number(self, text):
+    def _clean_identifier(self, text):
         """Clean up part number text and validate it"""
         if not text:
             return ""
@@ -206,207 +214,235 @@ class WebCrawlerService:
 
         return result
 
-    async def _extract_text(self, page, selector):
-        """Extract text from the first element matching the selector"""
+    async def _extract_text(self, page, selector, field_type="part_number"):
+        """Extract text from the first element matching the selector
 
+        Args:
+            page: Playwright page object
+            selector: CSS selector to find elements
+            field_type: Type of field to extract ("sku_id" or "part_number")
+        """
         url = page.url
 
-        # Skip part number extraction for category/listing pages
+        # Skip extraction for category/listing pages
         if any(pattern in url for pattern in ['/c/', '/category/', '/collection/', '/products/']):
-            self.logger.info(f"Skipping part number extraction for category page: {url}")
+            self.logger.info(f"Skipping {field_type} extraction for category page: {url}")
             return None
 
         try:
-            # For part numbers, try multiple approaches
-            is_part_number = "part-number" in selector or "sku" in selector
+            # Dictionary to store found values with confidence scores
+            found_values = {}
 
-            if is_part_number:
-                self.logger.info(f"Attempting to extract part number using selector: {selector}")
+            # Get page title for context
+            page_title = await page.title()
+            self.logger.info(f"Attempting to extract {field_type} using selector: {selector}")
+            self.logger.info(f"Page title: {page_title}")
 
-                # Dictionary to store found part numbers with confidence scores
-                part_numbers = {}
+            # Split into standard CSS selectors and Playwright-specific ones
+            standard_selectors = []
+            playwright_selectors = []
 
-                # Get page title for context
-                page_title = await page.title()
-                self.logger.info(f"Page title: {page_title}")
+            for sel in selector.split(', '):
+                if ':has-text(' in sel:
+                    playwright_selectors.append(sel)
+                else:
+                    standard_selectors.append(sel)
 
-                # Split into standard CSS selectors and Playwright-specific ones
-                standard_selectors = []
-                playwright_selectors = []
-
-                for sel in selector.split(', '):
-                    if ':has-text(' in sel:
-                        playwright_selectors.append(sel)
-                    else:
-                        standard_selectors.append(sel)
-
-                # Use standard selectors with JS evaluation
-                if standard_selectors:
-                    try:
-                        std_selector_str = ', '.join(standard_selectors)
-                        element_count = await page.evaluate(f'''
-                            () => {{
-                                try {{
-                                    return document.querySelectorAll(`{std_selector_str}`).length;
-                                }} catch (e) {{
-                                    return "Error: " + e.message;
-                                }}
+            # Use standard selectors with JS evaluation
+            if standard_selectors:
+                try:
+                    std_selector_str = ', '.join(standard_selectors)
+                    element_count = await page.evaluate(f'''
+                        () => {{
+                            try {{
+                                return document.querySelectorAll(`{std_selector_str}`).length;
+                            }} catch (e) {{
+                                return "Error: " + e.message;
                             }}
-                        ''')
-                        self.logger.info(f"Found {element_count} elements matching standard selectors")
-                    except Exception as e:
-                        self.logger.warning(f"Error counting standard elements: {str(e)}")
-
-                # Try each individual selector with Playwright's API
-                element = await page.query_selector(selector)
-                if element:
-                    text = await element.text_content()
-                    if text:
-                        text = text.strip()
-                        if is_part_number:
-                            self.logger.info(f"Found potential part number with selector: '{text}'")
-                            part_numbers[text] = 80  # High confidence for direct selector match
-                            return text
-
-                # Try structured data - highest confidence
-                try:
-                    sku = await page.evaluate('''() => {
-                        const jsonLd = document.querySelector('script[type="application/ld+json"]');
-                        if (jsonLd) {
-                            try {
-                                const data = JSON.parse(jsonLd.textContent);
-                                if (data.sku) return data.sku;
-                                if (data.mpn) return data.mpn;
-                                if (data.productID) return data.productID;
-                            } catch(e) {}
-                        }
-                        return null;
-                    }''')
-                    if sku:
-                        self.logger.info(f"Found part number in structured data: '{sku}'")
-                        part_numbers[sku] = 95  # Very high confidence
-                        return sku
+                        }}
+                    ''')
+                    self.logger.info(f"Found {element_count} elements matching standard selectors for {field_type}")
                 except Exception as e:
-                    self.logger.debug(f"Error extracting structured data: {str(e)}")
+                    self.logger.warning(f"Error counting standard elements for {field_type}: {str(e)}")
 
-                # Try meta tags - high confidence
-                try:
-                    meta_sku = await page.evaluate('''() => {
-                        const meta = document.querySelector('meta[property="product:sku"], meta[name="product:sku"]');
-                        return meta ? meta.getAttribute('content') : null;
-                    }''')
-                    if meta_sku:
-                        self.logger.info(f"Found part number in meta tag: '{meta_sku}'")
-                        part_numbers[meta_sku] = 90  # High confidence
-                        return meta_sku
-                except Exception as e:
-                    self.logger.debug(f"Error extracting from meta tags: {str(e)}")
+            # Try each individual selector with Playwright's API
+            element = await page.query_selector(selector)
+            if element:
+                text = await element.text_content()
+                if text:
+                    text = text.strip()
+                    self.logger.info(f"Found potential {field_type} with selector: '{text}'")
+                    found_values[text] = 80  # High confidence for direct selector match
+                    return text
 
-                # Try URL path extraction - also high confidence
-                try:
-                    url_part_number = await page.evaluate('''() => {
-                        // Extract from URL
-                        const url = window.location.href;
+            # Try structured data - highest confidence
+            try:
+                # Adjust JSON-LD search based on field type
+                field_keys = ["sku", "productID"] if field_type == "sku_id" else ["mpn", "model"]
 
-                        // Look for product ID patterns in URL
-                        const patterns = [
-                            /\\/p[\\/-](\\d{6,10})\\b/i,  // Product IDs after /p/ (like 30389175)
-                            /\\/(\\d{5,10})-/,            // Numeric IDs followed by hyphen
+                structured_data_js = f'''() => {{
+                    const jsonLd = document.querySelector('script[type="application/ld+json"]');
+                    if (jsonLd) {{
+                        try {{
+                            const data = JSON.parse(jsonLd.textContent);
+                            if (data.{field_keys[0]}) return data.{field_keys[0]};
+                            if (data.{field_keys[1]}) return data.{field_keys[1]};
+                        }} catch(e) {{}}
+                    }}
+                    return null;
+                }}'''
+
+                value = await page.evaluate(structured_data_js)
+                if value:
+                    self.logger.info(f"Found {field_type} in structured data: '{value}'")
+                    found_values[value] = 95  # Very high confidence
+                    return value
+            except Exception as e:
+                self.logger.debug(f"Error extracting {field_type} from structured data: {str(e)}")
+
+            # Try meta tags - high confidence
+            try:
+                meta_property = "product:sku" if field_type == "sku_id" else "product:mpn"
+                meta_js = f'''() => {{
+                    const meta = document.querySelector('meta[property="{meta_property}"], meta[name="{meta_property}"]');
+                    return meta ? meta.getAttribute('content') : null;
+                }}'''
+
+                meta_value = await page.evaluate(meta_js)
+                if meta_value:
+                    self.logger.info(f"Found {field_type} in meta tag: '{meta_value}'")
+                    found_values[meta_value] = 90  # High confidence
+                    return meta_value
+            except Exception as e:
+                self.logger.debug(f"Error extracting {field_type} from meta tags: {str(e)}")
+
+            # URL path extraction - different patterns for SKU vs Part Number
+            try:
+                url_patterns_js = '''() => {
+                    // Extract from URL
+                    const url = window.location.href;
+
+                    // Look for different patterns based on field type
+                    const patterns = '%s' === 'sku_id' ? 
+                        [
+                            /\\/sku[\\/-](\\w{5,12})\\b/i,     // SKU in URL path
+                            /\\/(S-\\d{5,10})\\//,             // S-prefixed SKUs 
+                            /item\\/(\\w{5,12})\\b/i           // item/SKU pattern
+                        ] : [
+                            /\\/p[\\/-](\\d{6,10})\\b/i,       // Product IDs after /p/ (like 30389175)
+                            /\\/(\\d{5,10})-/,                 // Numeric IDs followed by hyphen
                             /\\/([A-Z0-9]{2,6}[\\-\\/][0-9]{1,4})\\//i  // Like 960A/10
                         ];
 
-                        for (const pattern of patterns) {
-                            const match = url.match(pattern);
-                            if (match && match[1]) return match[1];
-                        }
-                        return null;
-                    }''')
+                    for (const pattern of patterns) {
+                        const match = url.match(pattern);
+                        if (match && match[1]) return match[1];
+                    }
+                    return null;
+                }'''.replace('%s', field_type)
 
-                    if url_part_number:
-                        self.logger.info(f"Found part number in URL: '{url_part_number}'")
-                        part_numbers[url_part_number] = 85  # High confidence for URL-based IDs
-                        return url_part_number
-                except Exception as e:
-                    self.logger.debug(f"Error extracting from URL: {str(e)}")
+                url_value = await page.evaluate(url_patterns_js)
+                if url_value:
+                    self.logger.info(f"Found {field_type} in URL: '{url_value}'")
+                    found_values[url_value] = 85  # High confidence for URL-based IDs
+                    return url_value
+            except Exception as e:
+                self.logger.debug(f"Error extracting {field_type} from URL: {str(e)}")
 
-                # Pattern matching - lower confidence
-                try:
-                    part_number_patterns = await page.evaluate('''() => {
-                        // Get all text nodes
-                        const textNodes = [];
-                        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                        let node;
-                        while(node = walker.nextNode()) {
-                            if(node.textContent.trim()) textNodes.push(node.textContent.trim());
-                        }
+            # Pattern matching - different patterns for SKU vs Part Number
+            try:
+                # Different regex patterns based on field type
+                patterns_js = '''() => {
+                    // Get all text nodes
+                    const textNodes = [];
+                    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                    let node;
+                    while(node = walker.nextNode()) {
+                        if(node.textContent.trim()) textNodes.push(node.textContent.trim());
+                    }
 
-                        // Common part number patterns
-                        const patterns = [
-                            /(?:SKU|Part|Item|Model|Cat|Catalog)[#:\\s]+([A-Z0-9\\-\\/]{4,15})\\b/i,
+                    // Different patterns based on field type
+                    const patterns = '%s' === 'sku_id' ? 
+                        [
+                            /(?:SKU|Item)[#:\\s]+([A-Z0-9\\-\\/]{4,15})\\b/i,
+                            /\\bItem\\s*(?:Code|Number)?:\\s*([A-Z0-9\\-\\/]{4,15})\\b/i,
+                            /\\bSKU\\s*(?:Code|Number)?:\\s*([A-Z0-9\\-\\/]{4,15})\\b/i
+                        ] : [
+                            /(?:Part|Model|Cat|Catalog)[#:\\s]+([A-Z0-9\\-\\/]{4,15})\\b/i,
                             /\\b([A-Z]{2,4}[0-9]{3,10})\\b(?!\\s+[a-z])/,
                             /\\b([0-9]{5,10}[A-Z]{1,3})\\b/
                         ];
 
-                        for(const nodeText of textNodes) {
-                            for(const pattern of patterns) {
-                                const match = nodeText.match(pattern);
-                                if(match && match[1]) return match[1];
-                            }
+                    for(const nodeText of textNodes) {
+                        for(const pattern of patterns) {
+                            const match = nodeText.match(pattern);
+                            if(match && match[1]) return match[1];
                         }
-                        return null;
-                    }''')
+                    }
+                    return null;
+                }'''.replace('%s', field_type)
 
-                    if part_number_patterns:
-                        # Filter out common words
-                        common_words = ["requires", "includes", "contains", "features", "warranty",
-                                        "optional", "recommended", "available", "specifications",
-                                        "details", "standard", "package", "content", "product", "online"]
+                pattern_value = await page.evaluate(patterns_js)
 
-                        if part_number_patterns.lower() in common_words:
-                            self.logger.info(f"Filtered out common word: '{part_number_patterns}'")
-                        else:
-                            self.logger.info(f"Found part number via text pattern matching: '{part_number_patterns}'")
-                            part_numbers[part_number_patterns] = 60  # Lower confidence for pattern matching
-                            return part_number_patterns
-                except Exception as e:
-                    self.logger.debug(f"Error with pattern matching: {str(e)}")
+                if pattern_value:
+                    # Filter out common words
+                    common_words = ["requires", "includes", "contains", "features", "warranty",
+                                    "optional", "recommended", "available", "specifications",
+                                    "details", "standard", "package", "content", "product", "online"]
 
-                # Attribute-based extraction
-                try:
-                    attr_part_number = await page.evaluate('''() => {
-                        const attrSelectors = [
-                            '[data-sku]', '[data-product-id]', '[data-item-number]',
-                            '[data-part-number]', '[data-model]', '[itemprop="sku"]',
-                            '[itemprop="productID"]', '[id*="product-id"]'
+                    if pattern_value.lower() in common_words:
+                        self.logger.info(f"Filtered out common word: '{pattern_value}'")
+                    else:
+                        self.logger.info(f"Found {field_type} via text pattern matching: '{pattern_value}'")
+                        found_values[pattern_value] = 60  # Lower confidence for pattern matching
+                        return pattern_value
+            except Exception as e:
+                self.logger.debug(f"Error with pattern matching for {field_type}: {str(e)}")
+
+            # Attribute-based extraction - different attributes for SKU vs Part Number
+            try:
+                attr_js = '''() => {
+                    const attrSelectors = '%s' === 'sku_id' ? 
+                        [
+                            '[data-sku]', '[data-item-number]', '[itemprop="sku"]',
+                            '[id*="sku"]', '[class*="sku"]'
+                        ] : [
+                            '[data-product-id]', '[data-part-number]', '[data-model]',
+                            '[itemprop="productID"]', '[id*="product-id"]', '[id*="part-number"]'
                         ];
 
-                        for(const selector of attrSelectors) {
-                            const el = document.querySelector(selector);
-                            if(el) {
-                                for(const attr of ['data-sku', 'data-product-id', 'data-item-number',
-                                                   'data-part-number', 'data-model', 'content']) {
-                                    if(el.hasAttribute(attr)) return el.getAttribute(attr);
-                                }
-                                return el.textContent.trim();
+                    const attrNames = '%s' === 'sku_id' ? 
+                        ['data-sku', 'data-item-number', 'content'] : 
+                        ['data-product-id', 'data-part-number', 'data-model', 'content'];
+
+                    for(const selector of attrSelectors) {
+                        const el = document.querySelector(selector);
+                        if(el) {
+                            for(const attr of attrNames) {
+                                if(el.hasAttribute(attr)) return el.getAttribute(attr);
                             }
+                            return el.textContent.trim();
                         }
-                        return null;
-                    }''')
+                    }
+                    return null;
+                }'''.replace('%s', field_type).replace('%s', field_type)
 
-                    if attr_part_number:
-                        self.logger.info(f"Found part number in attributes: '{attr_part_number}'")
-                        part_numbers[attr_part_number] = 75  # Good confidence for attribute-based
-                        return attr_part_number
-                except Exception as e:
-                    self.logger.debug(f"Error extracting from attributes: {str(e)}")
+                attr_value = await page.evaluate(attr_js)
 
-                # If we found multiple part numbers, return the one with highest confidence
-                if part_numbers:
-                    best_part_number = max(part_numbers.items(), key=lambda x: x[1])[0]
-                    self.logger.info(f"Selected best part number: {best_part_number} with confidence {part_numbers[best_part_number]}")
-                    return best_part_number
+                if attr_value:
+                    self.logger.info(f"Found {field_type} in attributes: '{attr_value}'")
+                    found_values[attr_value] = 75  # Good confidence for attribute-based
+                    return attr_value
+            except Exception as e:
+                self.logger.debug(f"Error extracting {field_type} from attributes: {str(e)}")
 
-                self.logger.info("No part number found using any method")
+            # If we found multiple values, return the one with highest confidence
+            if found_values:
+                best_value = max(found_values.items(), key=lambda x: x[1])[0]
+                self.logger.info(f"Selected best {field_type}: {best_value} with confidence {found_values[best_value]}")
+                return best_value
+
+            self.logger.info(f"No {field_type} found using any method")
         except Exception as e:
-            self.logger.debug(f"Extraction error for selector '{selector}': {str(e)}")
+            self.logger.debug(f"Extraction error for {field_type} with selector '{selector}': {str(e)}")
         return None

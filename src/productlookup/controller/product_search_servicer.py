@@ -41,8 +41,8 @@ class ProductSearchServicer:
 
                     # Log if part numbers were found
                     for product in enriched_products:
-                        if product.product_id:
-                            self.logger.info(f"Found part number '{product.product_id}' for {product.product_url}")
+                        if product.sku_id:
+                            self.logger.info(f"Found part number '{product.sku_id}' for {product.product_url}")
                         else:
                             self.logger.warning(f"No part number found for {product.product_url}")
 
@@ -91,7 +91,7 @@ class ProductSearchServicer:
                 url = result.get("link")
                 if url:
                     basic_product = product_search_pb2.ProductData(
-                        product_id="",
+                        sku_id="",
                         product_name=result.get("title", ""),
                         description=result.get("snippet", ""),
                         product_url=url
@@ -108,7 +108,8 @@ class ProductSearchServicer:
             products = []
             for product in enriched_products:
                 product_dict = {
-                    "product_id": product.product_id,
+                    "sku_id": product.sku_id,
+                    "part_number": product.part_number,
                     "product_name": product.product_name,
                     "brand": product.brand,
                     "price": product.price,

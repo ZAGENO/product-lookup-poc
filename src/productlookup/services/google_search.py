@@ -55,7 +55,7 @@ class GoogleSearchService:
 
                 if url:
                     product = product_search_pb2.ProductData(
-                        product_id="",
+                        sku_id="",
                         product_name=title,
                         brand="",
                         description=snippet,
